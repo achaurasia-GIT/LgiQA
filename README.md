@@ -8,3 +8,15 @@ Automated Playwright + TypeScript release gate and deterministic evaluation suit
 cd qa_exercise
 npm install
 npx playwright install chromium
+
+
+Run the full passing release gate (UI + Evals in parallel):
+npm run test:gate
+
+Run only UI/contract tests or only deterministic evals:
+npm run test:e2e
+npm run test:eval
+
+Observe an intentional regression failure:
+npm run test:regression
+npx playwright show-report
