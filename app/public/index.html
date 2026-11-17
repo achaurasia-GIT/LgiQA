@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Support Agent Dashboard</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    .msg { padding: 0.5rem; border-bottom: 1px solid #eee; }
+    .status-banner { padding: 0.75rem; border-radius: 6px; margin-top: 1rem; }
+    .error { background: #fee2e2; color: #991b1b; }
+    .warn { background: #fef3c7; color: #92400e; }
+    .ok { background: #ecfdf5; color: #065f46; }
+    button { padding: 0.5rem 1rem; margin-right: 0.5rem; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <h1>Ticket Workbench</h1>
+  <div class="card">
+    <label for="ticket-select">Select Ticket:</label>
+    <select id="ticket-select">
+      <option value="T-101">T-101: Duplicate charge on corporate flight booking</option>
+      <option value="T-102">T-102: Empty follow-up ticket</option>
+      <option value="T-202">T-202: GST invoice download failing</option>
+    </select>
+    <button id="load-ticket">Open Ticket</button>
+  </div>
+
+  <div id="ticket-view" class="card" hidden>
+    <h2 id="ticket-title"></h2>
+    <div id="messages-list"></div>
+
+    <div style="margin-top: 1rem;">
+      <button id="generate-btn">Generate summary</button>
+      <button id="retry-btn" hidden>Retry generation</button>
+      <button id="approve-btn" disabled>Approve summary</button>
+    </div>
+
+    <div id="feedback-area" aria-live="polite"></div>
+  </div>
+
+  <script>
+    // Toggle intentional regression via query param or server injection for CI demo
+    const SIMULATE_CITATION_BUG = new URLSearchParams(window.location.search).get('bug') === '1';
+
+    let currentTicket = null;
+    let latestDraft = null;
+
+    const ticketSelect = document.getElementById('ticket-select');
+    const loadBtn = document.getElementById('load-ticket');
+    const ticketView = document.getElementById('ticket-view');
+    const ticketTitle = document.getElementById('ticket-title');
+    const messagesList = document.getElementById('messages-list');
+    const generateBtn = document.getElementById('generate-btn');
+    const retryBtn = document.getElementById('retry-btn');
+    const approveBtn = document.getElementById('approve-btn');
+    const feedbackArea = document.getElementById('feedback-area');
+
+    function validateCitations(sourceIds, ticketMessages) {
+      if (SIMULATE_CITATION_BUG) {
+        // Intentional regression: skips cross-ticket membership check
+        return Array.isArray(sourceIds) && sourceIds.length > 0;
+      }
+      if (!Array.isArray(sourceIds) || sourceIds.length === 0) return false;
+      const validIds = new Set(ticketMessages.map(m => m.id));
+      return sourceIds.every(id => validIds.has(id));
+    }
+
+    function resetSummaryUI() {
+      latestDraft = null;
+      approveBtn.disabled = true;
+      retryBtn.hidden = true;
+      feedbackArea.innerHTML = '';
+    }
+
+    async function openTicket(ticketId) {
+      resetSummaryUI();
+      const res = await fetch(`/api/tickets/${ticketId}`);
+      currentTicket = await res.json();
+      ticketTitle.textContent = `${currentTicket.id} — ${currentTicket.subject}`;
+      messagesList.innerHTML = currentTicket.messages
+        .map(m => `<div class="msg" data-msg-id="${m.id}"><strong>[${m.id}] ${m.author}:</strong> ${m.text}</div>`)
+        .join('');
+      ticketView.hidden = false;
+    }
+
+    async function requestSummary() {
+      if (!currentTicket) return;
+      approveBtn.disabled = true;
+      retryBtn.hidden = true;
+      feedbackArea.innerHTML = '<p>Generating summary...</p>';
+
+      const res = await fetch(`/api/tickets/${currentTicket.id}/summary`, { method: 'POST' });
+
+      if (res.status === 503) {
+        feedbackArea.innerHTML = `<div class="status-banner error" role="alert">Service unavailable (503). Please retry.</div>`;
+        retryBtn.hidden = false;
+        return;
+      }
+
+      const data = await res.json();
+
+      if (data.status === 'insufficient_information') {
+        feedbackArea.innerHTML = `<div class="status-banner warn" role="status">Insufficient information in ticket to generate a reliable summary.</div>`;
+        approveBtn.disabled = true;
+        return;
+      }
+
+      if (data.status === 'ok') {
+        const citationsOk = validateCitations(data.sourceIds, currentTicket.messages);
+        if (!citationsOk) {
+          feedbackArea.innerHTML = `
+            <div class="status-banner error" role="alert">
+              Summary blocked: missing or invalid source citations (${JSON.stringify(data.sourceIds || [])}).
+            </div>`;
+          approveBtn.disabled = true;
+          return;
+        }
+
+        latestDraft = data;
+        feedbackArea.innerHTML = `
+          <div class="status-banner ok" data-testid="summary-output">
+            <p>${data.summary}</p>
+            <small>Sources: ${data.sourceIds.join(', ')}</small>
+          </div>`;
+        approveBtn.disabled = false;
+      }
+    }
+
+    async function approveSummary() {
+      if (!currentTicket || !latestDraft) return;
+      const res = await fetch(`/api/tickets/${currentTicket.id}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(latestDraft),
+      });
+      if (res.ok) {
+        approveBtn.disabled = true;
+        feedbackArea.innerHTML += `<div class="status-banner ok" data-testid="approval-confirmed">Summary approved and saved.</div>`;
+      }
+    }
+
+    loadBtn.addEventListener('click', () => openTicket(ticketSelect.value));
+    generateBtn.addEventListener('click', requestSummary);
+    retryBtn.addEventListener('click', requestSummary);
+    approveBtn.addEventListener('click', approveSummary);
+  </script>
+</body>
+</html>
