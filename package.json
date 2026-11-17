@@ -1,0 +1,22 @@
+{
+  "name": "qa_exercise",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start:app": "tsx app/server.ts",
+    "test:e2e": "playwright test tests/",
+    "test:eval": "playwright test evals/",
+    "test:gate": "playwright test",
+    "test:regression": "SIMULATE_CITATION_BUG=true playwright test tests/summary-gate.spec.ts -g \"blocks approval when summary cites cross-ticket\""
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
