@@ -1,0 +1,48 @@
+name: AI Summary Release Gate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  release-gate:
+    name: UI Gate & Deterministic Summary Evals
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Typecheck TypeScript
+        run: npx tsc --noEmit
+
+      - name: Run Deterministic Summary Evaluations (Release Blocker)
+        run: npm run test:eval
+
+      - name: Run Playwright UI & Contract Release Gate (Release Blocker)
+        run: npm run test:e2e
+
+      - name: Upload Failure Evidence (Traces, Screenshots, Videos, HTML Report)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-evidence-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
